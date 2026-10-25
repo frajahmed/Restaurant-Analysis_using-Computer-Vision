@@ -91,8 +91,10 @@ Alle Skripte aus dem Projektordner starten, z.B. `python phase2/2_4_standing_fil
 ## Dashboard starten
 
 ```bash
-python -m app.server
+python main.py
 ```
+
+Weitere Befehle: `python main.py tables` (Tische markieren), `python main.py test` (Tests), `python main.py 2.7` (einzelner Lernschritt).
 
 - Am Rechner: <http://localhost:8000>
 - Vom Handy im selben WLAN: die beim Start angezeigte Adresse `http://<IP>:8000`
