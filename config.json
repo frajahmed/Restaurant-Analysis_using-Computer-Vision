@@ -1,0 +1,19 @@
+{
+  "source": "videos/restaurant.mp4",
+  "model": "yolo11n.pt",
+  "pose_model": "yolo11n-pose.pt",
+  "conf": 0.4,
+  "dedupe_iou": 0.6,
+  "dedupe_contain": 0.8,
+  "seats_total": 24,
+  "occupy_after_sec": 3.0,
+  "free_after_sec": 6.0,
+  "lock_window_sec": 4.0,
+  "sit_ratio": 0.55,
+  "process_width": 1280,
+  "tables": [
+    {"id": "T1", "seats": 4, "polygon": [[100, 300], [400, 300], [400, 550], [100, 550]]},
+    {"id": "T2", "seats": 4, "polygon": [[500, 300], [800, 300], [800, 550], [500, 550]]},
+    {"id": "T3", "seats": 2, "polygon": [[900, 300], [1150, 300], [1150, 550], [900, 550]]}
+  ]
+}

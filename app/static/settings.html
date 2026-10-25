@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Restaurant Einstellungen</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <span class="dot live"></span>
+  <h1>Restaurant <span>Analytics</span></h1>
+  <nav><a href="/">Dashboard</a><a href="/settings" class="active">Einstellungen</a></nav>
+</header>
+
+<main>
+  <div class="error" id="msg"></div>
+
+  <section class="panel" style="margin-bottom:18px">
+    <h2>Quelle &amp; Erkennung</h2>
+    <div class="form" id="form"></div>
+  </section>
+
+  <section class="panel" style="margin-bottom:18px">
+    <h2>Tische einzeichnen</h2>
+    <p style="color:var(--muted);margin-top:0">Klicke um jeden Tisch (inkl. Stühle) herum. Mit
+      <b>Tisch abschließen</b> wird das Polygon gespeichert. Klick auf einen Tisch in der Liste löscht ihn.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <label style="color:var(--muted)">Plätze</label>
+      <input id="seats" type="number" min="1" max="20" value="4" style="width:80px">
+      <button class="btn" id="close">Tisch abschließen</button>
+      <button class="btn ghost" id="undo">Punkt zurück</button>
+      <button class="btn ghost" id="reload">Neues Standbild</button>
+      <button class="btn danger" id="clearT">Alle Tische löschen</button>
+    </div>
+    <div style="position:relative">
+      <img id="snap" style="width:100%;display:block;border-radius:10px" alt="">
+      <canvas id="cv" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair"></canvas>
+    </div>
+    <div class="tlist" id="tables" style="margin-top:12px"></div>
+  </section>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn" id="save">Speichern &amp; Neustart</button>
+    <button class="btn danger" id="wipe">Verlauf (Datenbank) löschen</button>
+  </div>
+</main>
+
+<script>
+const FIELDS = [
+  ["source", "Videoquelle", "text", "Datei (videos/x.mp4), Webcam-Nummer (0) oder rtsp://…"],
+  ["pose_model", "Pose-Modell", "text", "yolo11n-pose.pt … yolo11x-pose.pt"],
+  ["conf", "Min. Konfidenz", "number", "0.2 – 0.7, höher = weniger Fehlalarme"],
+  ["dedupe_iou", "Duplikat IoU", "number", "Überlappung ab der Boxen doppelt sind"],
+  ["dedupe_contain", "Duplikat Enthalten", "number", "Anteil, zu dem eine Box in einer anderen steckt"],
+  ["occupy_after_sec", "Belegt nach (s)", "number", "So lange muss jemand am Tisch sein"],
+  ["free_after_sec", "Frei nach (s)", "number", "So lange muss der Tisch leer sein"],
+  ["lock_window_sec", "Zähl-Fenster (s)", "number", "Glättung der Gästezahl"],
+  ["sit_ratio", "Sitz-Schwelle", "number", "Oberschenkel/Rumpf – kleiner = strenger"],
+  ["seats_total", "Plätze gesamt", "number", "Für die Auslastung"],
+  ["process_width", "Verarbeitungsbreite (px)", "number", "Kleiner = schneller"],
+];
+const $ = id => document.getElementById(id);
+let cfg = {}, tables = [], current = [], natW = 1280, natH = 720;
+
+function msg(text, ok) {
+  const m = $("msg"); m.textContent = text; m.style.display = "block";
+  m.style.borderColor = ok ? "var(--free)" : "var(--busy)";
+  m.style.color = ok ? "#b6f5d8" : "#ffb3b3";
+  m.style.background = ok ? "rgba(62,207,142,.12)" : "rgba(239,93,93,.12)";
+  setTimeout(() => m.style.display = "none", 4000);
+}
+
+async function load() {
+  cfg = await (await fetch("/api/config")).json();
+  tables = cfg.tables || [];
+  $("form").innerHTML = FIELDS.map(([k, l, t, h]) => `
+    <div><label for="f-${k}">${l}</label>
+    <input id="f-${k}" type="${t}" step="any" value="${cfg[k] ?? ""}"><small>${h}</small></div>`).join("");
+  loadSnap();
+}
+
+function loadSnap() {
+  const img = $("snap");
+  img.onload = () => { natW = img.naturalWidth; natH = img.naturalHeight; resize(); };
+  img.onerror = () => msg("Noch kein Standbild – läuft die Analyse? (Fehler im Dashboard prüfen)");
+  img.src = "/api/snapshot?t=" + Date.now();
+}
+
+function resize() {
+  const c = $("cv"); c.width = natW; c.height = natH; draw();
+}
+
+function draw() {
+  const c = $("cv"), g = c.getContext("2d");
+  g.clearRect(0, 0, c.width, c.height);
+  const lw = Math.max(2, natW / 400);
+  g.lineWidth = lw; g.font = `bold ${natW/45}px system-ui`;
+  for (const t of tables) {
+    g.beginPath(); t.polygon.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath();
+    g.fillStyle = "rgba(62,207,142,.22)"; g.fill(); g.strokeStyle = "#3ecf8e"; g.stroke();
+    g.fillStyle = "#fff"; g.fillText(`${t.id} (${t.seats})`, t.polygon[0][0] + 6, t.polygon[0][1] + natW/40);
+  }
+  if (current.length) {
+    g.strokeStyle = "#f4c13b"; g.fillStyle = "#f4c13b";
+    g.beginPath(); current.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke();
+    current.forEach(([x, y]) => { g.beginPath(); g.arc(x, y, lw * 2.5, 0, 7); g.fill(); });
+  }
+  $("tables").innerHTML = tables.map((t, i) => `
+    <div class="tcard" style="cursor:pointer" title="Klicken zum Löschen" onclick="delTable(${i})">
+      <b>${t.id}</b><br><span class="s">${t.seats} Plätze · ${t.polygon.length} Punkte ✕</span></div>`).join("")
+    || `<span style="color:var(--muted)">Noch keine Tische</span>`;
+}
+
+function delTable(i) { tables.splice(i, 1); tables.forEach((t, j) => t.id = "T" + (j + 1)); draw(); }
+
+$("cv").addEventListener("click", e => {
+  const r = e.target.getBoundingClientRect();
+  current.push([Math.round((e.clientX - r.left) * natW / r.width), Math.round((e.clientY - r.top) * natH / r.height)]);
+  draw();
+});
+$("close").onclick = () => {
+  if (current.length < 3) return msg("Mindestens 3 Punkte setzen");
+  tables.push({ id: "T" + (tables.length + 1), seats: +$("seats").value || 4, polygon: current });
+  current = []; draw();
+};
+$("undo").onclick = () => { current.pop(); draw(); };
+$("reload").onclick = loadSnap;
+$("clearT").onclick = () => { if (confirm("Alle Tische löschen?")) { tables = []; current = []; draw(); } };
+window.addEventListener("resize", draw);
+
+$("save").onclick = async () => {
+  const body = { tables };
+  for (const [k, , t] of FIELDS) { const v = $("f-" + k).value; body[k] = t === "number" ? Number(v) : v; }
+  const sumSeats = tables.reduce((a, t) => a + t.seats, 0);
+  if (sumSeats && !body.seats_total) body.seats_total = sumSeats;
+  const r = await fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  r.ok ? msg("Gespeichert – Analyse startet neu.", true) : msg(j.detail || "Fehler beim Speichern");
+};
+$("wipe").onclick = async () => {
+  if (!confirm("Alle gespeicherten Besuche und Verlaufsdaten löschen?")) return;
+  await fetch("/api/history", { method: "DELETE" }); msg("Verlauf gelöscht.", true);
+};
+
+load();
+</script>
+</body>
+</html>

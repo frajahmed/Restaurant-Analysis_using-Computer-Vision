@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Restaurant Analytics</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+<header>
+  <span class="dot" id="live"></span>
+  <h1>Restaurant <span>Analytics</span></h1>
+  <nav><a href="/" class="active">Dashboard</a><a href="/settings">Einstellungen</a></nav>
+</header>
+
+<main>
+  <div class="error" id="err"></div>
+
+  <section class="cards">
+    <div class="card"><div class="label">Gäste jetzt</div><div class="value" id="c-guests">–</div>
+      <div class="sub" id="c-seats">von – Plätzen</div><div class="bar"><i id="c-bar"></i></div></div>
+    <div class="card"><div class="label">Auslastung</div><div class="value" id="c-cap">–</div>
+      <div class="sub">belegte Plätze</div></div>
+    <div class="card"><div class="label">Tische belegt</div><div class="value" id="c-tables">–</div>
+      <div class="sub" id="c-free">– frei</div></div>
+    <div class="card"><div class="label">Besuche heute</div><div class="value" id="c-visits">–</div>
+      <div class="sub" id="c-vguests">– Gäste</div></div>
+    <div class="card"><div class="label">Ø Verweildauer</div><div class="value" id="c-avg">–</div>
+      <div class="sub">heute</div></div>
+    <div class="card"><div class="label">Personen im Bild</div><div class="value" id="c-people">–</div>
+      <div class="sub" id="c-standing">– stehend · – FPS</div></div>
+  </section>
+
+  <section class="grid">
+    <div class="panel">
+      <h2>Live-Kamera</h2>
+      <img class="video" src="/video" alt="Live-Video">
+    </div>
+    <div class="panel">
+      <h2>Grundriss</h2>
+      <svg id="floor" viewBox="0 0 1280 720" style="width:100%;background:var(--panel2);border-radius:10px"></svg>
+      <div class="legend">
+        <span><i style="background:var(--free)"></i>frei</span>
+        <span><i style="background:var(--wait)"></i>wartet</span>
+        <span><i style="background:var(--busy)"></i>belegt</span>
+        <span><i style="background:var(--leave)"></i>geht?</span>
+      </div>
+      <div class="tlist" id="tlist" style="margin-top:14px"></div>
+    </div>
+  </section>
+
+  <section class="grid" style="margin-top:18px">
+    <div class="panel">
+      <h2>Verlauf heute (pro Stunde)</h2>
+      <canvas id="chart" height="120"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Letzte Besuche</h2>
+      <div style="max-height:320px;overflow:auto">
+        <table><thead><tr><th>Tisch</th><th>Start</th><th>Dauer</th><th>Gäste</th></tr></thead>
+          <tbody id="visits"><tr><td colspan="4" style="color:var(--muted)">Noch keine Besuche</td></tr></tbody></table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const COLORS = { free: "#3ecf8e", pending: "#f4c13b", occupied: "#ef5d5d", leaving: "#f58a3b" };
+const STATE = { free: "frei", pending: "wartet", occupied: "belegt", leaving: "geht?" };
+const $ = id => document.getElementById(id);
+const fmt = s => { s = Math.round(s); const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
+  return h ? `${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}` : `${m}:${String(x).padStart(2,"0")}`; };
+const time = ts => new Date(ts*1000).toLocaleTimeString("de-DE", {hour:"2-digit", minute:"2-digit"});
+
+function drawFloor(s) {
+  const svg = $("floor");
+  svg.setAttribute("viewBox", `0 0 ${s.frame_w} ${s.frame_h}`);
+  const r = Math.max(10, s.frame_w / 90);
+  let html = "";
+  for (const t of s.tables) {
+    const c = COLORS[t.state];
+    const pts = t.polygon.map(p => p.join(",")).join(" ");
+    const xs = t.polygon.map(p => p[0]), ys = t.polygon.map(p => p[1]);
+    const cx = xs.reduce((a,b)=>a+b)/xs.length, cy = ys.reduce((a,b)=>a+b)/ys.length;
+    const rx = (Math.max(...xs) - Math.min(...xs)) / 2 * 0.72, ry = (Math.max(...ys) - Math.min(...ys)) / 2 * 0.72;
+    html += `<polygon points="${pts}" fill="${c}" fill-opacity="0.18" stroke="${c}" stroke-width="${r/3}" rx="8"/>`;
+    for (let i = 0; i < t.seats; i++) {
+      const a = -Math.PI/2 + i * 2*Math.PI / t.seats;
+      const taken = i < t.guests;
+      html += `<circle cx="${cx + rx*Math.cos(a)}" cy="${cy + ry*Math.sin(a)}" r="${r}"
+               fill="${taken ? c : "none"}" stroke="${c}" stroke-width="${r/4}"/>`;
+    }
+    html += `<text x="${cx}" y="${cy}" fill="#e8eaef" font-size="${r*2.2}" font-weight="700"
+             text-anchor="middle" dominant-baseline="middle">${t.id}</text>`;
+    if (t.occupied) html += `<text x="${cx}" y="${cy + r*2.4}" fill="#e8eaef" font-size="${r*1.5}"
+             text-anchor="middle" dominant-baseline="middle">${fmt(t.duration)}</text>`;
+  }
+  svg.innerHTML = html;
+
+  $("tlist").innerHTML = s.tables.map(t => `
+    <div class="tcard" style="border-color:${COLORS[t.state]}">
+      <b>${t.id}</b> <span class="s">${STATE[t.state]}</span><br>
+      <span class="s">${t.guests}/${t.seats} Gäste${t.occupied ? " · " + fmt(t.duration) : ""}</span>
+    </div>`).join("");
+}
+
+async function tick() {
+  try {
+    const s = await (await fetch("/api/stats")).json();
+    $("live").classList.toggle("live", !!s.running);
+    $("err").style.display = s.error ? "block" : "none";
+    if (s.error) $("err").textContent = "Fehler: " + s.error;
+    if (!s.running) return;
+    const cap = s.capacity;
+    $("c-guests").textContent = s.guests;
+    $("c-seats").textContent = `von ${s.seats_total} Plätzen`;
+    $("c-cap").textContent = Math.round(cap * 100) + " %";
+    const bar = $("c-bar"); bar.style.width = Math.min(100, cap*100) + "%";
+    bar.style.background = cap < .6 ? "var(--free)" : cap < .9 ? "var(--wait)" : "var(--busy)";
+    $("c-tables").textContent = `${s.tables_occupied}/${s.tables_total}`;
+    $("c-free").textContent = `${s.tables_total - s.tables_occupied} frei`;
+    $("c-visits").textContent = s.today.visits;
+    $("c-vguests").textContent = `${s.today.guests} Gäste`;
+    $("c-avg").textContent = s.today.visits ? fmt(s.today.avg_duration) : "–";
+    $("c-people").textContent = s.people_total;
+    $("c-standing").textContent = `${s.standing} stehend · ${s.fps} FPS`;
+    drawFloor(s);
+  } catch (e) { $("live").classList.remove("live"); }
+}
+
+let chart;
+async function slow() {
+  try {
+    const v = await (await fetch("/api/visits?limit=30")).json();
+    if (v.length) $("visits").innerHTML = v.map(x =>
+      `<tr><td>${x.table_id}</td><td class="num">${time(x.start_ts)}</td><td class="num">${fmt(x.duration)}</td><td class="num">${x.guests}</td></tr>`).join("");
+    const h = await (await fetch("/api/history")).json();
+    const data = {
+      labels: h.map(x => String(x.hour).padStart(2, "0") + ":00"),
+      datasets: [
+        { type: "bar", label: "Ø Gäste", data: h.map(x => x.avg_guests), backgroundColor: "rgba(244,164,59,.7)", borderRadius: 4 },
+        { type: "line", label: "Besuche", data: h.map(x => x.visits), borderColor: "#3ecf8e", tension: .3, pointRadius: 2 },
+      ],
+    };
+    if (window.Chart) {
+      if (!chart) chart = new Chart($("chart"), { data, options: {
+        plugins: { legend: { labels: { color: "#8b93a5" } } },
+        scales: { x: { ticks: { color: "#8b93a5" }, grid: { color: "#2a2f3a" } },
+                  y: { beginAtZero: true, ticks: { color: "#8b93a5" }, grid: { color: "#2a2f3a" } } } } });
+      else { chart.data = data; chart.update(); }
+    }
+  } catch (e) {}
+}
+
+tick(); slow();
+setInterval(tick, 1000);
+setInterval(slow, 10000);
+</script>
+</body>
+</html>
