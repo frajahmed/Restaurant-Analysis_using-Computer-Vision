@@ -1,0 +1,16 @@
+# Keep the build context small: no git history, local environments, data or videos.
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+*.pt
+*.db
+visits.csv
+data/
+videos/
+.idea
+.vscode
+*.md
+!README.md

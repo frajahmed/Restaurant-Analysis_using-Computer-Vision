@@ -6,6 +6,7 @@ Open:   http://localhost:8000 – or from a phone/laptop on the same Wi-Fi:
 """
 from __future__ import annotations
 
+import os
 import socket
 import sys
 from contextlib import asynccontextmanager
@@ -25,7 +26,9 @@ from .db import Database  # noqa: E402
 from .engine import Engine  # noqa: E402
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-HOST, PORT = "0.0.0.0", 8000
+# Listen on all interfaces so phones/laptops on the same Wi-Fi (or Docker) can connect.
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", "8000"))
 
 
 def create_app(engine: Engine, db: Database) -> FastAPI:

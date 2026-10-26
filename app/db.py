@@ -1,6 +1,7 @@
 """SQLite storage for finished visits and per-minute snapshots."""
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 import time
@@ -9,8 +10,9 @@ from pathlib import Path
 from rcv.config import ROOT
 from rcv.tables import Visit
 
-#: Default database file in the project root.
-DB_PATH = ROOT / "restaurant.db"
+#: Database file. Defaults to the project root; can be changed with the ``RCV_DB``
+#: environment variable (the Docker image keeps it in the ``data/`` volume).
+DB_PATH = Path(os.environ.get("RCV_DB", ROOT / "restaurant.db"))
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS visits (

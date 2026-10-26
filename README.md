@@ -49,6 +49,8 @@ Der Code hier ist eine eigenständige Umsetzung derselben Idee und Kapitelstrukt
 │   ├── db.py                 Database – SQLite
 │   └── static/               index.html, settings.html, style.css
 ├── tools/mark_tables.py      TableMarker – Tische per Mausklick markieren
+├── Dockerfile, docker-compose.yml, docker/entrypoint.sh   Docker
+├── .github/workflows/ci.yml  Tests + Docker-Build bei jedem Push
 └── tests/test_logic.py       Tests für die Logik (ohne YOLO)
 ```
 
@@ -142,6 +144,37 @@ Weitere Befehle: `python main.py tables` (Tische markieren), `python main.py tes
   (ggf. Port 8000 in der Firewall freigeben)
 
 **API**: `/api/stats` · `/api/visits` · `/api/history` · `/api/config` (GET/POST) · `/api/snapshot` · `/video`
+
+## Mit Docker starten
+
+Statt Python zu installieren, kann das Dashboard auch in einem Docker-Container laufen.
+Voraussetzung: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS) bzw. Docker Engine (Linux).
+
+```bash
+# 1. Video ablegen
+#    videos/restaurant.mp4
+
+# 2. Bauen und starten (der erste Build dauert einige Minuten)
+docker compose up -d --build
+
+# 3. Öffnen
+#    http://localhost:8000   → unter "Einstellungen" die Tische einzeichnen
+```
+
+| Befehl | Zweck |
+|---|---|
+| `docker compose logs -f` | Ausgaben anzeigen |
+| `docker compose down` | stoppen |
+| `docker compose up -d --build` | nach einem `git pull` neu bauen und starten |
+
+- **Ordner:** `videos/` wird schreibgeschützt eingebunden; `data/` enthält `config.json`
+  und `restaurant.db` und bleibt bei Updates erhalten.
+- **Nur das Dashboard:** Die Fenster-Schritte (`phase1/`, `phase2/`, `python main.py tables`)
+  brauchen einen Bildschirm und laufen deshalb direkt mit Python, nicht im Container.
+- **Kamera:** Eine IP-Kamera funktioniert überall (`rtsp://…` als Videoquelle).
+  Eine USB-Webcam nur unter Linux, siehe Kommentar in `docker-compose.yml`.
+- **CPU:** Das Image nutzt PyTorch ohne Grafikkarte. Für mehr Tempo `process_width`
+  verkleinern (z.B. 960).
 
 ## Wichtige Einstellungen (`config.json`)
 

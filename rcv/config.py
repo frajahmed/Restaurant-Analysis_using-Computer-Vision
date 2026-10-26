@@ -8,14 +8,16 @@ are caught immediately.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
 #: Project root folder (one level above ``rcv/``).
 ROOT = Path(__file__).resolve().parent.parent
-#: Default location of the configuration file.
-CONFIG_PATH = ROOT / "config.json"
+#: Location of the configuration file. Can be changed with the ``RCV_CONFIG``
+#: environment variable (the Docker image keeps it in the ``data/`` volume).
+CONFIG_PATH = Path(os.environ.get("RCV_CONFIG", ROOT / "config.json"))
 
 
 class ConfigError(ValueError):

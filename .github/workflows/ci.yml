@@ -1,0 +1,47 @@
+# Runs on every push and pull request:
+#   1. the logic tests (no YOLO needed)
+#   2. a full Docker build plus a smoke test of the running dashboard
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: pip install numpy opencv-python-headless
+      - name: Run logic tests
+        run: python main.py test
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t restaurant-analysis .
+      - name: Start container and check the dashboard
+        run: |
+          mkdir -p data videos
+          docker run -d --name app -p 8000:8000 \
+            -v "$PWD/data:/app/data" -v "$PWD/videos:/app/videos:ro" restaurant-analysis
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8000/api/stats && break
+            sleep 2
+          done
+          echo
+          curl -fs http://localhost:8000/ | grep -q "Restaurant"
+          curl -fs http://localhost:8000/api/config | grep -q "tables"
+          docker logs app
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs app || true
