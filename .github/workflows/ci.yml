@@ -27,21 +27,44 @@ jobs:
     needs: tests
     steps:
       - uses: actions/checkout@v4
+
       - name: Build image
         run: docker build -t restaurant-analysis .
-      - name: Start container and check the dashboard
+
+      - name: Start container (same volume setup as docker-compose.yml)
         run: |
-          mkdir -p data videos
+          docker volume create restaurant-data
           docker run -d --name app -p 8000:8000 \
-            -v "$PWD/data:/app/data" -v "$PWD/videos:/app/videos:ro" restaurant-analysis
-          for i in $(seq 1 30); do
-            curl -fs http://localhost:8000/api/stats && break
+            -v restaurant-data:/app/data \
+            -v "$PWD/videos:/app/videos:ro" \
+            restaurant-analysis
+
+      - name: Wait for the dashboard
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fs http://localhost:8000/api/stats > /dev/null; then
+              echo "Dashboard is up after $((i * 2)) s"; exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' app)" != "true" ]; then
+              echo "Container stopped"; exit 1
+            fi
             sleep 2
           done
-          echo
+          echo "Dashboard did not answer within 90 s"; exit 1
+
+      - name: Check pages and API
+        run: |
           curl -fs http://localhost:8000/ | grep -q "Restaurant"
-          curl -fs http://localhost:8000/api/config | grep -q "tables"
-          docker logs app
-      - name: Container logs on failure
+          curl -fs http://localhost:8000/settings | grep -q "Tische"
+          curl -fs http://localhost:8000/api/config | grep -q '"tables"'
+          curl -fs http://localhost:8000/api/stats
+          echo
+          curl -fs http://localhost:8000/api/history | grep -q '"hour"'
+          docker exec app test -f /app/data/config.json
+
+      - name: Report container output on failure
         if: failure()
-        run: docker logs app || true
+        run: |
+          docker ps -a || true
+          # Annotations are visible on the run summary page.
+          docker logs app 2>&1 | tail -25 | sed 's/^/::error title=docker logs::/' || true

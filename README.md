@@ -167,8 +167,9 @@ docker compose up -d --build
 | `docker compose down` | stoppen |
 | `docker compose up -d --build` | nach einem `git pull` neu bauen und starten |
 
-- **Ordner:** `videos/` wird schreibgeschützt eingebunden; `data/` enthält `config.json`
-  und `restaurant.db` und bleibt bei Updates erhalten.
+- **Daten:** `videos/` wird schreibgeschützt eingebunden. Einstellungen (`config.json`) und
+  Datenbank liegen im Docker-Volume `restaurant-data` und bleiben bei Updates erhalten.
+  `docker compose down -v` setzt alles zurück.
 - **Nur das Dashboard:** Die Fenster-Schritte (`phase1/`, `phase2/`, `python main.py tables`)
   brauchen einen Bildschirm und laufen deshalb direkt mit Python, nicht im Container.
 - **Kamera:** Eine IP-Kamera funktioniert überall (`rtsp://…` als Videoquelle).

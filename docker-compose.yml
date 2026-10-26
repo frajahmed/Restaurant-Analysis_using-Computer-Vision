@@ -1,7 +1,8 @@
 # Start:   docker compose up -d --build
 # Open:    http://localhost:8000
 # Logs:    docker compose logs -f
-# Stop:    docker compose down
+# Stop:    docker compose down          (settings and history are kept)
+# Reset:   docker compose down -v       (also deletes settings and history)
 
 services:
   restaurant:
@@ -13,8 +14,9 @@ services:
     volumes:
       # Put your video(s) into ./videos on the host (read-only in the container).
       - ./videos:/app/videos:ro
-      # Settings (config.json) and the SQLite database are stored in ./data.
-      - ./data:/app/data
+      # Settings (config.json) and the SQLite database live in a Docker volume.
+      # A named volume avoids file-permission problems between host and container.
+      - restaurant-data:/app/data
     restart: unless-stopped
 
     # Webcam (Linux hosts only – Docker Desktop on Windows/macOS cannot pass a webcam):
@@ -22,3 +24,6 @@ services:
     #   - /dev/video0:/dev/video0
     # then set "Videoquelle" to 0 on the settings page.
     # An IP camera works everywhere: set "Videoquelle" to rtsp://user:pass@ip:554/stream
+
+volumes:
+  restaurant-data:
