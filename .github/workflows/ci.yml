@@ -62,9 +62,48 @@ jobs:
           curl -fs http://localhost:8000/api/history | grep -q '"hour"'
           docker exec app test -f /app/data/config.json
 
+      - name: End-to-end test with the real YOLO models (pipeline + learning steps)
+        shell: bash
+        run: |
+          set -o pipefail
+          docker run --rm restaurant-analysis python tests/e2e_yolo.py 2>&1 | tee e2e.log
+          # Key results as annotations on the run summary page.
+          grep -E "Pipeline:|bestanden" e2e.log | sed 's/^ */::notice title=E2E::/'
+
+      - name: Dashboard with a real video (settings API → restart → live numbers)
+        run: |
+          docker exec app python tests/e2e_yolo.py --make-video /app/data/e2e.mp4
+          curl -fs -X POST http://localhost:8000/api/config -H "Content-Type: application/json" -d '{
+            "source": "/app/data/e2e.mp4",
+            "tables": [
+              {"id": "L", "seats": 4, "polygon": [[0, 0], [640, 0], [640, 720], [0, 720]]},
+              {"id": "R", "seats": 4, "polygon": [[640, 0], [1280, 0], [1280, 720], [640, 720]]}
+            ]}'
+          echo
+          for i in $(seq 1 60); do
+            stats=$(curl -fs http://localhost:8000/api/stats || true)
+            people=$(echo "$stats" | jq -r '.people_total // 0')
+            if [ "$people" -ge 2 ]; then
+              echo "Live numbers after $((i * 2)) s:"
+              echo "::notice title=Dashboard::$(echo "$stats" | jq -c '{running, error, fps, people_total, standing, guests, tables_occupied, tables_total}')"
+              break
+            fi
+            sleep 2
+          done
+          [ "$people" -ge 2 ] || { echo "No people detected: $stats"; exit 1; }
+          echo "$stats" | jq -e '.error == null and .running == true' > /dev/null
+          echo "$stats" | jq -e '[.tables[].id] == ["L", "R"]' > /dev/null
+          # Video stream and still frame deliver JPEG data.
+          curl -fs -o snap.jpg http://localhost:8000/api/snapshot && file snap.jpg | grep -q JPEG
+          bytes=$(curl -s --max-time 3 http://localhost:8000/video | wc -c || true)
+          echo "MJPEG bytes in 3 s: $bytes"; [ "$bytes" -gt 10000 ]
+          # The setting was persisted in the data volume.
+          docker exec app grep -q e2e.mp4 /app/data/config.json
+
       - name: Report container output on failure
         if: failure()
         run: |
           docker ps -a || true
           # Annotations are visible on the run summary page.
-          docker logs app 2>&1 | tail -25 | sed 's/^/::error title=docker logs::/' || true
+          docker logs app 2>&1 | tail -15 | sed 's/^/::error title=docker logs::/' || true
+          [ -f e2e.log ] && tail -15 e2e.log | sed 's/^/::error title=e2e::/' || true

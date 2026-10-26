@@ -25,6 +25,7 @@ class Engine:
     """Owns the processing thread and exposes thread-safe read access to its results."""
 
     SNAPSHOT_INTERVAL = 60.0  # seconds between occupancy snapshots in the database
+    RECONNECT_AFTER = 10      # failed reads in a row before a live source is re-opened
 
     def __init__(self, database: Database, config_path=CONFIG_PATH):
         self.db = database
@@ -80,13 +81,22 @@ class Engine:
         renderer = Renderer()
         last_snapshot = 0.0
         fps, previous = 0.0, time.time()
+        failed_reads = 0
 
         with source:
             while not stop.is_set():
                 frame = source.read()
-                if frame is None:          # live stream interrupted → wait and retry
+                if frame is None:
+                    # Live stream interrupted (or a non-looping file ended): wait, then
+                    # re-open the source after several failures in a row.
+                    failed_reads += 1
+                    if failed_reads >= self.RECONNECT_AFTER:
+                        print("[Engine] Keine Bilder – Videoquelle wird neu verbunden …")
+                        source.reconnect()
+                        failed_reads = 0
                     time.sleep(0.5)
                     continue
+                failed_reads = 0
 
                 video_time, wall_time = source.timestamp, time.time()
                 result = analyzer.process(frame, video_time)

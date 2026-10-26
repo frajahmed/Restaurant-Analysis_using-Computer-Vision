@@ -28,13 +28,14 @@ class VideoSource:
     def __init__(self, source: str, width: int | None = 1280, loop: bool = True):
         self.width = width
         self.loop = loop
+        # Frames read since opening. Not reset when a file loops, so that
+        # `timestamp` keeps increasing and timers never jump backwards.
         self.frame_index = 0
 
-        target = self._resolve(source)
-        self.is_file = isinstance(target, str) and not target.startswith(("rtsp", "http"))
-        self._cap = cv2.VideoCapture(target)
-        if not self._cap.isOpened():
-            raise RuntimeError(f"Videoquelle kann nicht geöffnet werden: {source}")
+        self._source = source
+        self._target = self._resolve(source)
+        self.is_file = isinstance(self._target, str) and not self._target.startswith(("rtsp", "http"))
+        self._cap = self._open()
         self.fps: float = self._cap.get(cv2.CAP_PROP_FPS) or 25.0
 
     # ------------------------------------------------------------------ internal helpers
@@ -53,6 +54,12 @@ class VideoSource:
             raise FileNotFoundError(f"Video nicht gefunden: {path}")
         return str(path)
 
+    def _open(self) -> cv2.VideoCapture:
+        cap = cv2.VideoCapture(self._target)
+        if not cap.isOpened():
+            raise RuntimeError(f"Videoquelle kann nicht geöffnet werden: {self._source}")
+        return cap
+
     def _resize(self, frame: np.ndarray) -> np.ndarray:
         if not self.width or frame.shape[1] == self.width:
             return frame
@@ -64,9 +71,8 @@ class VideoSource:
         """Return the next frame, or ``None`` when the source has ended."""
         ok, frame = self._cap.read()
         if not ok and self.is_file and self.loop:
-            # End of file reached → rewind to the start.
+            # End of file reached → rewind to the start (frame_index keeps counting).
             self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            self.frame_index = 0
             ok, frame = self._cap.read()
         if not ok:
             return None
@@ -81,6 +87,19 @@ class VideoSource:
         runs slower or faster than real time.
         """
         return self.frame_index / self.fps if self.is_file else time.time()
+
+    def reconnect(self) -> bool:
+        """Re-open the source, e.g. after a network camera dropped out.
+
+        Returns:
+            ``True`` if the source could be opened again.
+        """
+        self._cap.release()
+        try:
+            self._cap = self._open()
+            return True
+        except RuntimeError:
+            return False
 
     def release(self) -> None:
         """Close the video source."""

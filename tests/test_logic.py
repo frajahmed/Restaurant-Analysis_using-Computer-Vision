@@ -132,6 +132,27 @@ def test_table_lifecycle():
     assert visits[0].guests == 2 and 95 < visits[0].duration < 100
 
 
+# ---------------------------------------------------------------------- video
+def test_video_timestamp_keeps_increasing_when_looping():
+    """Regression: looping a file must not reset the clock (timers would run backwards)."""
+    import cv2
+    from rcv import VideoSource
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = str(Path(tmp) / "short.mp4")
+        writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), 25, (320, 240))
+        for _ in range(10):
+            writer.write(np.zeros((240, 320, 3), np.uint8))
+        writer.release()
+
+        with VideoSource(path, width=320) as source:
+            stamps = []
+            for _ in range(35):                      # 3.5 passes through a 10-frame file
+                assert source.read() is not None
+                stamps.append(source.timestamp)
+    assert all(later > earlier for earlier, later in zip(stamps, stamps[1:]))
+
+
 # ---------------------------------------------------------------------- pipeline
 def test_analyzer_pipeline():
     cfg = Config(tables=[square_table(seats=4)], occupy_after_sec=1, free_after_sec=1)

@@ -201,8 +201,14 @@ docker compose up -d --build
 ## Tests
 
 ```bash
-python main.py test
+python main.py test              # 11 Logik-Tests, ohne YOLO und ohne Video
+python tests/e2e_yolo.py         # End-to-End-Test mit echtem YOLO11 (lädt die Modelle)
 ```
 
-10 Tests prüfen Geometrie, Duplikat-Filter, Sitzen/Stehen, Tisch-Zuordnung, Glättung,
-den kompletten Tisch-Ablauf, die Pipeline und die Konfiguration – ohne YOLO und ohne Video.
+Die Logik-Tests prüfen Geometrie, Duplikat-Filter, Sitzen/Stehen, Tisch-Zuordnung, Glättung,
+den kompletten Tisch-Ablauf, die Pipeline, die Konfiguration und die Videoquelle.
+Der End-to-End-Test baut aus den Ultralytics-Beispielfotos ein Video und lässt die echte
+Pipeline sowie alle Lernschritte darauf laufen.
+
+Bei jedem Push prüft GitHub Actions automatisch: Logik-Tests, Docker-Build, End-to-End-Test
+mit YOLO im Container und das Dashboard mit echtem Video (Reiter **Actions** im Repo).
