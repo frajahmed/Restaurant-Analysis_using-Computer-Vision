@@ -1,4 +1,4 @@
-"""3.3 SQLite: Besuche und minütliche Momentaufnahmen speichern und auslesen."""
+"""SQLite storage for finished visits and per-minute snapshots."""
 from __future__ import annotations
 
 import sqlite3
@@ -6,15 +6,19 @@ import threading
 import time
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "restaurant.db"
+from rcv.config import ROOT
+from rcv.tables import Visit
 
-SCHEMA = """
+#: Default database file in the project root.
+DB_PATH = ROOT / "restaurant.db"
+
+_SCHEMA = """
 CREATE TABLE IF NOT EXISTS visits (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     table_id  TEXT    NOT NULL,
-    start_ts  REAL    NOT NULL,
+    start_ts  REAL    NOT NULL,   -- Unix time (seconds)
     end_ts    REAL    NOT NULL,
-    duration  REAL    NOT NULL,
+    duration  REAL    NOT NULL,   -- seconds
     guests    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -28,65 +32,83 @@ CREATE INDEX IF NOT EXISTS idx_visits_start ON visits(start_ts);
 
 
 class Database:
+    """Small thread-safe wrapper around one SQLite connection.
+
+    The analysis thread writes and the web server reads at the same time, so
+    every access is guarded by a lock.
+    """
+
     def __init__(self, path: Path | str = DB_PATH):
-        self.conn = sqlite3.connect(str(path), check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.lock = threading.Lock()
-        with self.lock:
-            self.conn.executescript(SCHEMA)
+        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
+        with self._lock:
+            self._conn.executescript(_SCHEMA)
 
-    # ------------------------------------------------------------- schreiben
-    def add_visit(self, table_id, start_ts, end_ts, guests):
-        with self.lock:
-            self.conn.execute(
-                "INSERT INTO visits(table_id,start_ts,end_ts,duration,guests) VALUES (?,?,?,?,?)",
-                (table_id, start_ts, end_ts, end_ts - start_ts, int(guests)))
-            self.conn.commit()
+    # ------------------------------------------------------------------ write
+    def add_visit(self, visit: Visit) -> None:
+        """Store a finished visit (``start``/``end`` must be Unix timestamps)."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO visits (table_id, start_ts, end_ts, duration, guests) VALUES (?, ?, ?, ?, ?)",
+                (visit.table_id, visit.start, visit.end, visit.duration, int(visit.guests)))
+            self._conn.commit()
 
-    def add_snapshot(self, ts, guests, occupied, total):
-        with self.lock:
-            self.conn.execute("INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?)",
-                              (ts, int(guests), int(occupied), int(total)))
-            self.conn.commit()
+    def add_snapshot(self, ts: float, guests: int, occupied: int, total: int) -> None:
+        """Store the current occupancy (used for the hourly chart)."""
+        with self._lock:
+            self._conn.execute("INSERT OR REPLACE INTO snapshots VALUES (?, ?, ?, ?)",
+                               (ts, int(guests), int(occupied), int(total)))
+            self._conn.commit()
 
-    def clear(self):
-        with self.lock:
-            self.conn.execute("DELETE FROM visits")
-            self.conn.execute("DELETE FROM snapshots")
-            self.conn.commit()
+    def clear(self) -> None:
+        """Delete all stored data."""
+        with self._lock:
+            self._conn.execute("DELETE FROM visits")
+            self._conn.execute("DELETE FROM snapshots")
+            self._conn.commit()
 
-    # ------------------------------------------------------------- lesen
-    def recent_visits(self, limit=50) -> list[dict]:
-        with self.lock:
-            rows = self.conn.execute(
+    # ------------------------------------------------------------------ read
+    def recent_visits(self, limit: int = 50) -> list[dict]:
+        """The most recently finished visits, newest first."""
+        with self._lock:
+            rows = self._conn.execute(
                 "SELECT * FROM visits ORDER BY end_ts DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     def today_summary(self) -> dict:
-        start = _midnight()
-        with self.lock:
-            r = self.conn.execute(
-                "SELECT COUNT(*) n, COALESCE(SUM(guests),0) g, COALESCE(AVG(duration),0) d "
-                "FROM visits WHERE start_ts >= ?", (start,)).fetchone()
-        return {"visits": r["n"], "guests": r["g"], "avg_duration": round(r["d"], 1)}
+        """Number of visits, guests and average duration since midnight."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(guests), 0) AS g, COALESCE(AVG(duration), 0) AS d "
+                "FROM visits WHERE start_ts >= ?", (self._midnight(),)).fetchone()
+        return {"visits": row["n"], "guests": row["g"], "avg_duration": round(row["d"], 1)}
 
     def hourly(self, day_start: float | None = None) -> list[dict]:
-        """Pro Stunde: Ø Gäste (aus Snapshots) und Anzahl begonnener Besuche."""
-        day_start = day_start or _midnight()
+        """For each hour of a day: average/max guests (from snapshots) and visits started."""
+        day_start = day_start or self._midnight()
         day_end = day_start + 86400
-        with self.lock:
-            snaps = self.conn.execute(
-                "SELECT CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) h, AVG(guests) g, "
-                "MAX(guests) m FROM snapshots WHERE ts >= ? AND ts < ? GROUP BY h", (day_start, day_end)).fetchall()
-            vis = self.conn.execute(
-                "SELECT CAST(strftime('%H', start_ts, 'unixepoch', 'localtime') AS INTEGER) h, COUNT(*) n "
+        hour_expr = "CAST(strftime('%H', {col}, 'unixepoch', 'localtime') AS INTEGER)"
+        with self._lock:
+            snaps = self._conn.execute(
+                f"SELECT {hour_expr.format(col='ts')} AS h, AVG(guests) AS g, MAX(guests) AS m "
+                "FROM snapshots WHERE ts >= ? AND ts < ? GROUP BY h", (day_start, day_end)).fetchall()
+            visits = self._conn.execute(
+                f"SELECT {hour_expr.format(col='start_ts')} AS h, COUNT(*) AS n "
                 "FROM visits WHERE start_ts >= ? AND start_ts < ? GROUP BY h", (day_start, day_end)).fetchall()
-        s = {r["h"]: r for r in snaps}
-        v = {r["h"]: r["n"] for r in vis}
-        return [{"hour": h, "avg_guests": round(s[h]["g"], 1) if h in s else 0,
-                 "max_guests": s[h]["m"] if h in s else 0, "visits": v.get(h, 0)} for h in range(24)]
 
+        by_hour = {r["h"]: r for r in snaps}
+        visit_count = {r["h"]: r["n"] for r in visits}
+        return [{
+            "hour": h,
+            "avg_guests": round(by_hour[h]["g"], 1) if h in by_hour else 0,
+            "max_guests": by_hour[h]["m"] if h in by_hour else 0,
+            "visits": visit_count.get(h, 0),
+        } for h in range(24)]
 
-def _midnight() -> float:
-    lt = time.localtime()
-    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    # ------------------------------------------------------------------ helpers
+    @staticmethod
+    def _midnight() -> float:
+        """Unix timestamp of today's local midnight."""
+        lt = time.localtime()
+        return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))

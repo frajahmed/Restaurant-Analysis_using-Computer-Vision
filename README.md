@@ -28,21 +28,62 @@ Der Code hier ist eine eigenständige Umsetzung derselben Idee und Kapitelstrukt
 ## Projektstruktur
 
 ```
+├── main.py                   Startpunkt (Dashboard, Tische, Tests, Lernschritte)
 ├── config.json               Videoquelle, Modelle, Schwellwerte, Tische
-├── rcv/                      Gemeinsame Bausteine
-│   ├── utils.py              Config, Videoquelle, Geometrie, Zeichnen
-│   ├── detection.py          YOLO, Duplikat-Filter, Sitzen/Stehen
-│   ├── tables.py             Zuordnung, Belegt-Status, Glättung, Besuchs-Timer
-│   └── render.py             Tische & Personen einzeichnen
+├── rcv/                      Kern-Bibliothek (wiederverwendbare Klassen)
+│   ├── config.py             Config, TableConfig
+│   ├── geometry.py           Box, Polygon
+│   ├── video.py              VideoSource
+│   ├── detection.py          PersonDetector, DuplicateFilter, PostureClassifier, Person
+│   ├── tables.py             Table, TableManager, CountSmoother, Visit, TableState
+│   ├── analyzer.py           RestaurantAnalyzer (komplette Pipeline)
+│   ├── render.py             Renderer, Window, Color
+│   ├── step.py               VideoStep (Basisklasse der Lernschritte)
+│   └── streaming.py          FrameBuffer, BackgroundWorker (Video im Browser)
 ├── phase1/                   1.1 – 1.4  Python-Grundlagen
 ├── phase2/                   2.1 – 2.7  Tisch-Logik
 ├── phase3/                   3.1 – 3.3  Browser-Grundlagen
-├── app/                      3.4 Komplettes Dashboard (FastAPI + SQLite)
-│   ├── server.py  engine.py  db.py
-│   └── static/  index.html  settings.html  style.css
-├── tools/mark_tables.py      Tische per Mausklick markieren
+├── app/                      3.4 Komplettes Dashboard
+│   ├── server.py             FastAPI-App (create_app)
+│   ├── engine.py             Engine – Analyse im Hintergrund-Thread
+│   ├── db.py                 Database – SQLite
+│   └── static/               index.html, settings.html, style.css
+├── tools/mark_tables.py      TableMarker – Tische per Mausklick markieren
 └── tests/test_logic.py       Tests für die Logik (ohne YOLO)
 ```
+
+## Architektur
+
+Der Code ist objektorientiert aufgebaut: Jede Klasse hat genau eine Aufgabe, und alle
+Klassen sind mit englischen Docstrings, Kommentaren und Type-Hints dokumentiert.
+
+```
+VideoSource ──frame──▶ RestaurantAnalyzer ──────────────────────────────▶ FrameResult
+                         │
+                         ├─ PersonDetector     YOLO11 → list[Person]
+                         ├─ DuplicateFilter    doppelte Boxen entfernen
+                         ├─ PostureClassifier  sitzt / steht (Pose-Keypoints)
+                         └─ TableManager       Personen → Tische
+                              └─ Table         Zustand + CountSmoother + Visit
+```
+
+| Klasse | Aufgabe |
+|---|---|
+| `Config` | lädt, prüft und speichert `config.json` |
+| `VideoSource` | Datei, Webcam oder Stream; liefert Bilder und Zeitstempel |
+| `PersonDetector` | YOLO-Modell, gibt nur Personen zurück |
+| `DuplicateFilter` | entfernt doppelte Boxen (IoU, Box-in-Box) |
+| `PostureClassifier` | erkennt Sitzen/Stehen aus Hüfte, Knie, Knöchel |
+| `Table` | Zustandsautomat `frei → wartet → belegt → geht? → frei` |
+| `CountSmoother` | stabile Gästezahl (häufigster Wert im Zeitfenster) |
+| `TableManager` | ordnet Personen den Tischen zu, aktualisiert alle Tische |
+| `RestaurantAnalyzer` | verbindet alles zu einer Pipeline |
+| `Renderer` / `Window` | zeichnet Ergebnisse, zeigt das Fenster |
+| `VideoStep` | Basisklasse: jeder Lernschritt implementiert nur `process()` |
+| `Engine` / `Database` | Hintergrund-Analyse und SQLite für das Dashboard |
+
+Der `RestaurantAnalyzer` bekommt den Detector von außen übergeben (Dependency Injection).
+Deshalb laufen die Tests mit einem simulierten Detector, ohne YOLO und ohne Grafikkarte.
 
 ## Installation
 
@@ -84,7 +125,7 @@ Mit NVIDIA-GPU vorher die passende PyTorch-Version von pytorch.org installieren 
 | 3.1 | `phase3/3_1_video_in_browser.py` | MJPEG-Stream mit FastAPI |
 | 3.2 | `phase3/3_2_live_numbers.py` | Live-Zahlen als JSON |
 | 3.3 | `phase3/3_3_database.py` | SQLite speichern & auswerten |
-| 3.4 | `python -m app.server` | **komplettes Dashboard** |
+| 3.4 | `python main.py` | **komplettes Dashboard** |
 
 Alle Skripte aus dem Projektordner starten, z.B. `python phase2/2_4_standing_filter.py`. Fenster mit `q` schließen.
 
@@ -126,5 +167,8 @@ Weitere Befehle: `python main.py tables` (Tische markieren), `python main.py tes
 ## Tests
 
 ```bash
-python tests/test_logic.py
+python main.py test
 ```
+
+10 Tests prüfen Geometrie, Duplikat-Filter, Sitzen/Stehen, Tisch-Zuordnung, Glättung,
+den kompletten Tisch-Ablauf, die Pipeline und die Konfiguration – ohne YOLO und ohne Video.

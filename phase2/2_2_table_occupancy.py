@@ -1,30 +1,46 @@
-"""2.2 Tischbelegung: Tische als Polygone (aus config.json, siehe tools/mark_tables.py).
-Liegt der Referenzpunkt einer Person im Polygon, gehört sie zu diesem Tisch."""
+"""Step 2.2 – Table occupancy.
+
+Tables are polygons from ``config.json`` (draw them with ``python main.py tables``).
+A person belongs to a table when their reference point lies inside its polygon.
+In this step a table is "occupied" as soon as anybody is inside – no delay yet.
+"""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from rcv.detection import detect_people, load_model, remove_duplicates  # noqa: E402
-from rcv.render import draw_people  # noqa: E402
-from rcv.tables import assign_tables  # noqa: E402
-from rcv.utils import GREEN, RED, VideoSource, draw_panel, draw_polygon, load_config, put_label, show  # noqa: E402
 
-cfg = load_config()
-model = load_model(cfg["model"])
-src = VideoSource(cfg["source"], cfg["process_width"])
+from rcv.step import VideoStep  # noqa: E402
+from rcv.detection import DuplicateFilter, PersonDetector  # noqa: E402
+from rcv.render import Color  # noqa: E402
+from rcv.tables import TableManager  # noqa: E402
 
-while (frame := src.read()) is not None:
-    people = remove_duplicates(detect_people(model, frame, cfg["conf"]), cfg["dedupe_iou"], cfg["dedupe_contain"])
-    per_table = assign_tables(people, cfg["tables"])
-    busy = 0
-    for t in cfg["tables"]:
-        occupied = len(per_table[t["id"]]) > 0
-        busy += occupied
-        color = RED if occupied else GREEN
-        draw_polygon(frame, t["polygon"], color)
-        put_label(frame, f'{t["id"]} {"belegt" if occupied else "frei"}', t["polygon"][0], color)
-    draw_people(frame, people)
-    draw_panel(frame, [f"Tische belegt: {busy}/{len(cfg['tables'])}"])
-    if not show("2.2 Table Occupancy", frame):
-        break
-src.release()
+
+class TableOccupancy(VideoStep):
+    title = "2.2 Table Occupancy"
+
+    def __init__(self):
+        super().__init__()
+        self.detector = PersonDetector(self.config.model, self.config.conf)
+        self.duplicates = DuplicateFilter(self.config.dedupe_iou, self.config.dedupe_contain)
+        self.tables = TableManager.from_config(self.config)
+
+    def process(self, frame, now):
+        people = self.duplicates.apply(self.detector.detect(frame))
+        per_table = self.tables.assign(people)
+
+        busy = 0
+        for table in self.tables:
+            occupied = len(per_table[table.id]) > 0
+            busy += occupied
+            color = Color.RED if occupied else Color.GREEN
+            self.renderer.polygon(frame, table.area, color)
+            self.renderer.label(frame, f"{table.id} {'belegt' if occupied else 'frei'}",
+                                table.area.top_point, color)
+
+        self.renderer.people(frame, people)
+        self.renderer.panel(frame, [f"Tische belegt: {busy}/{len(self.tables)}"])
+        return frame
+
+
+if __name__ == "__main__":
+    TableOccupancy().run()

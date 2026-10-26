@@ -1,32 +1,40 @@
-"""2.3 Belegungs-Timer: Ein Tisch gilt erst als belegt, wenn dort `occupy_after_sec`
-lang jemand ist (Vorbeilaufen zählt nicht), und erst als frei, wenn er
-`free_after_sec` leer war (kurz verdeckt zählt nicht).
+"""Step 2.3 – Occupancy timer.
 
-  frei ──Person──▶ wartet ──3 s──▶ belegt ──leer──▶ geht? ──6 s──▶ frei
+A table only counts as occupied after someone has been there for
+``occupy_after_sec`` (walking past does not count), and only becomes free after
+it has been empty for ``free_after_sec`` (being hidden briefly does not count).
+
+    free ──person──▶ pending ──3 s──▶ occupied ──empty──▶ leaving ──6 s──▶ free
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from rcv.detection import detect_people, load_model, remove_duplicates  # noqa: E402
-from rcv.render import draw_people, draw_tables  # noqa: E402
-from rcv.tables import assign_tables, build_tables  # noqa: E402
-from rcv.utils import VideoSource, draw_panel, load_config, show  # noqa: E402
 
-cfg = load_config()
-model = load_model(cfg["model"])
-src = VideoSource(cfg["source"], cfg["process_width"])
-tables = build_tables(cfg)
+from rcv.step import VideoStep  # noqa: E402
+from rcv.detection import DuplicateFilter, PersonDetector  # noqa: E402
+from rcv.tables import TableManager  # noqa: E402
 
-while (frame := src.read()) is not None:
-    now = src.video_time()
-    people = remove_duplicates(detect_people(model, frame, cfg["conf"]), cfg["dedupe_iou"], cfg["dedupe_contain"])
-    per_table = assign_tables(people, cfg["tables"])
-    for t in tables:
-        t.update(now, len(per_table[t.id]))
-    draw_tables(frame, tables, now, show_guests=False)
-    draw_people(frame, people)
-    draw_panel(frame, [f"Tische belegt: {sum(t.occupied for t in tables)}/{len(tables)}"])
-    if not show("2.3 Occupancy Timer", frame):
-        break
-src.release()
+
+class OccupancyTimer(VideoStep):
+    title = "2.3 Occupancy Timer"
+
+    def __init__(self):
+        super().__init__()
+        self.detector = PersonDetector(self.config.model, self.config.conf)
+        self.duplicates = DuplicateFilter(self.config.dedupe_iou, self.config.dedupe_contain)
+        self.tables = TableManager.from_config(self.config)
+
+    def process(self, frame, now):
+        people = self.duplicates.apply(self.detector.detect(frame))
+        # No posture yet → count everybody (standing people too).
+        self.tables.update(now, people, seated_only=False)
+
+        self.renderer.tables(frame, self.tables, now, show_guests=False)
+        self.renderer.people(frame, people)
+        self.renderer.panel(frame, [f"Tische belegt: {self.tables.occupied_count}/{len(self.tables)}"])
+        return frame
+
+
+if __name__ == "__main__":
+    OccupancyTimer().run()

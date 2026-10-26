@@ -1,25 +1,39 @@
-"""2.1 Duplikate entfernen: YOLO liefert manchmal zwei Boxen für eine Person
-(z.B. ganze Person + nur Oberkörper). Grau = verworfen, Grün = behalten."""
+"""Step 2.1 – Remove duplicates.
+
+YOLO sometimes returns two boxes for one person (e.g. full body + upper body).
+Grey = discarded duplicate, green = kept.
+"""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from rcv.detection import detect_people, load_model, remove_duplicates  # noqa: E402
-from rcv.utils import GREEN, GREY, VideoSource, draw_box, draw_panel, load_config, show  # noqa: E402
 
-cfg = load_config()
-model = load_model(cfg["model"])
-src = VideoSource(cfg["source"], cfg["process_width"])
+from rcv.step import VideoStep  # noqa: E402
+from rcv.detection import DuplicateFilter, PersonDetector  # noqa: E402
+from rcv.render import Color  # noqa: E402
 
-while (frame := src.read()) is not None:
-    raw = detect_people(model, frame, cfg["conf"])
-    kept = remove_duplicates(raw, cfg["dedupe_iou"], cfg["dedupe_contain"])
-    for p in raw:
-        if p not in kept:
-            draw_box(frame, p.box, GREY, "doppelt")
-    for p in kept:
-        draw_box(frame, p.box, GREEN)
-    draw_panel(frame, [f"Roh: {len(raw)}", f"Ohne Duplikate: {len(kept)}"])
-    if not show("2.1 Remove Duplicates", frame):
-        break
-src.release()
+
+class RemoveDuplicates(VideoStep):
+    title = "2.1 Remove Duplicates"
+
+    def __init__(self):
+        super().__init__()
+        self.detector = PersonDetector(self.config.model, self.config.conf)
+        self.duplicates = DuplicateFilter(self.config.dedupe_iou, self.config.dedupe_contain)
+
+    def process(self, frame, now):
+        raw = self.detector.detect(frame)
+        kept = self.duplicates.apply(raw)
+
+        for person in raw:
+            if person not in kept:      # identity comparison (Person uses eq=False)
+                self.renderer.box(frame, person.box, Color.GREY, "doppelt")
+        for person in kept:
+            self.renderer.box(frame, person.box, Color.GREEN)
+
+        self.renderer.panel(frame, [f"Roh: {len(raw)}", f"Ohne Duplikate: {len(kept)}"])
+        return frame
+
+
+if __name__ == "__main__":
+    RemoveDuplicates().run()

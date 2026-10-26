@@ -1,74 +1,87 @@
-"""3.2 Live-Zahlen: Zusätzlich zum Video liefert /stats die Werte als JSON,
-die Seite fragt sie jede Sekunde ab. Start: python phase3/3_2_live_numbers.py"""
+"""Step 3.2 – Live numbers.
+
+In addition to the video, ``/stats`` returns the key figures as JSON; the page
+polls it once per second. Start: ``python main.py 3.2``
+"""
 import sys
 import threading
-import time
 from pathlib import Path
 
-import cv2
-import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from rcv.detection import classify_posture, detect_people, load_model, remove_duplicates  # noqa: E402
-from rcv.render import draw_people, draw_tables  # noqa: E402
-from rcv.tables import assign_tables, build_tables  # noqa: E402
-from rcv.utils import VideoSource, load_config  # noqa: E402
 
-cfg = load_config()
-state = {"jpg": None, "stats": {}}
+import uvicorn  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.responses import HTMLResponse, StreamingResponse  # noqa: E402
+
+from rcv.analyzer import RestaurantAnalyzer  # noqa: E402
+from rcv.config import Config  # noqa: E402
+from rcv.render import Renderer  # noqa: E402
+from rcv.streaming import MJPEG_MEDIA_TYPE, BackgroundWorker, FrameBuffer, encode_jpeg  # noqa: E402
+from rcv.video import VideoSource  # noqa: E402
 
 PAGE = """<body style="margin:0;background:#111;color:#eee;font-family:system-ui">
 <div style="display:flex;gap:30px;padding:14px;font-size:22px">
   <div>Gäste: <b id=g>–</b></div><div>Tische belegt: <b id=t>–</b></div></div>
 <img src="/video" style="width:100%">
-<script>setInterval(async()=>{const s=await (await fetch('/stats')).json();
- g.textContent=s.guests+' / '+s.seats; t.textContent=s.occupied+' / '+s.tables},1000)</script></body>"""
+<script>
+setInterval(async () => {
+  const s = await (await fetch('/stats')).json();
+  g.textContent = s.guests + ' / ' + s.seats_total;
+  t.textContent = s.tables_occupied + ' / ' + s.tables_total;
+}, 1000);
+</script></body>"""
 
 
-def worker():
-    model = load_model(cfg["pose_model"])
-    src = VideoSource(cfg["source"], cfg["process_width"])
-    tables = build_tables(cfg)
-    while (frame := src.read()) is not None:
-        now = src.video_time()
-        people = remove_duplicates(detect_people(model, frame, cfg["conf"]))
-        for p in people:
-            p.posture = classify_posture(p, cfg["sit_ratio"])
-        per = assign_tables(people, cfg["tables"], only_sitting=True)
-        for t in tables:
-            t.update(now, len(per[t.id]))
-        draw_tables(frame, tables, now)
-        draw_people(frame, people)
-        state["jpg"] = cv2.imencode(".jpg", frame)[1].tobytes()
-        state["stats"] = {"guests": sum(t.guests for t in tables), "seats": cfg["seats_total"],
-                          "occupied": sum(t.occupied for t in tables), "tables": len(tables)}
+class LiveAnalysis:
+    """Runs the full pipeline in the background; exposes the frame and the numbers."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.frames = FrameBuffer()
+        self.worker = BackgroundWorker(self._loop)
+        self.renderer = Renderer()
+        self._stats: dict = {}
+        self._lock = threading.Lock()
+
+    @property
+    def stats(self) -> dict:
+        with self._lock:
+            return dict(self._stats)
+
+    def _loop(self, stop: threading.Event) -> None:
+        analyzer = RestaurantAnalyzer(self.config)
+        with VideoSource(self.config.source, self.config.process_width) as source:
+            for frame in source:
+                if stop.is_set():
+                    break
+                now = source.timestamp
+                result = analyzer.process(frame, now)
+                self.renderer.tables(frame, analyzer.tables, now)
+                self.renderer.people(frame, result.people)
+                self.frames.put(encode_jpeg(frame))
+                with self._lock:
+                    self._stats = analyzer.summary(result)
 
 
-app = FastAPI()
+def create_app(live: LiveAnalysis) -> FastAPI:
+    app = FastAPI()
 
+    @app.get("/")
+    def page():
+        return HTMLResponse(PAGE)
 
-@app.get("/")
-def page():
-    return HTMLResponse(PAGE)
+    @app.get("/stats")
+    def stats():
+        return live.stats
 
+    @app.get("/video")
+    def video():
+        return StreamingResponse(live.frames.mjpeg_stream(), media_type=MJPEG_MEDIA_TYPE)
 
-@app.get("/stats")
-def stats():
-    return state["stats"]
-
-
-@app.get("/video")
-def video():
-    def gen():
-        while True:
-            if state["jpg"]:
-                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + state["jpg"] + b"\r\n"
-            time.sleep(0.04)
-    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+    return app
 
 
 if __name__ == "__main__":
-    threading.Thread(target=worker, daemon=True).start()
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    live_analysis = LiveAnalysis(Config.load())
+    live_analysis.worker.start()
+    uvicorn.run(create_app(live_analysis), host="0.0.0.0", port=8000)

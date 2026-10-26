@@ -1,129 +1,122 @@
-"""Analyse-Engine: läuft im Hintergrund-Thread, verarbeitet die Videoquelle
-und stellt das letzte Bild (JPEG) sowie die Live-Zahlen bereit."""
+"""Analysis engine for the dashboard.
+
+Runs the :class:`~rcv.analyzer.RestaurantAnalyzer` in a background thread,
+keeps the latest frame and figures ready for the web server and writes
+finished visits and regular snapshots to the database.
+"""
 from __future__ import annotations
 
 import threading
 import time
+from typing import Any
 
-import cv2
-
-from rcv.detection import classify_posture, detect_people, load_model, remove_duplicates
-from rcv.render import draw_people, draw_tables
-from rcv.tables import assign_tables, build_tables
-from rcv.utils import VideoSource, load_config
+from rcv.analyzer import RestaurantAnalyzer
+from rcv.config import CONFIG_PATH, Config
+from rcv.detection import Detector, PersonDetector
+from rcv.render import Renderer
+from rcv.streaming import BackgroundWorker, FrameBuffer, encode_jpeg
+from rcv.tables import Visit
+from rcv.video import VideoSource
 
 from .db import Database
 
 
 class Engine:
-    SNAPSHOT_EVERY = 60  # Sekunden zwischen Datenbank-Momentaufnahmen
+    """Owns the processing thread and exposes thread-safe read access to its results."""
 
-    def __init__(self, db: Database):
-        self.db = db
-        self.lock = threading.Lock()
-        self.jpeg: bytes | None = None
-        self.raw_jpeg: bytes | None = None
-        self.stats: dict = {"running": False, "error": None}
-        self._thread: threading.Thread | None = None
-        self._stop = threading.Event()
-        self._models: dict = {}
+    SNAPSHOT_INTERVAL = 60.0  # seconds between occupancy snapshots in the database
 
-    # ------------------------------------------------------------- Steuerung
-    def start(self):
-        self.stop()
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+    def __init__(self, database: Database, config_path=CONFIG_PATH):
+        self.db = database
+        self.config_path = config_path
+        self.annotated = FrameBuffer()   # frame with boxes and tables (live view)
+        self.raw = FrameBuffer()         # clean frame (background for the table editor)
 
-    def stop(self):
-        if self._thread and self._thread.is_alive():
-            self._stop.set()
-            self._thread.join(timeout=5)
+        self._worker = BackgroundWorker(self._run, name="analysis")
+        self._stats_lock = threading.Lock()
+        self._stats: dict[str, Any] = {"running": False, "error": None}
+        self._detectors: dict[tuple[str, float], Detector] = {}   # cache: model loads are slow
 
-    def restart(self):
+    # ------------------------------------------------------------------ control
+    def start(self) -> None:
+        """(Re)start the analysis with the current configuration file."""
+        self._worker.start()
+
+    def stop(self) -> None:
+        self._worker.stop()
+
+    def restart(self) -> None:
         self.start()
 
-    def _model(self, name):
-        if name not in self._models:
-            self._models[name] = load_model(name)
-        return self._models[name]
+    # ------------------------------------------------------------------ read access
+    @property
+    def stats(self) -> dict[str, Any]:
+        with self._stats_lock:
+            return dict(self._stats)
 
-    # ------------------------------------------------------------- Schleife
-    def _run(self):
+    def _set_stats(self, stats: dict[str, Any]) -> None:
+        with self._stats_lock:
+            self._stats = stats
+
+    # ------------------------------------------------------------------ processing
+    def _detector(self, config: Config) -> Detector:
+        """Return a cached detector so that a restart does not reload the model."""
+        key = (config.pose_model, config.conf)
+        if key not in self._detectors:
+            self._detectors[key] = PersonDetector(config.pose_model, config.conf)
+        return self._detectors[key]
+
+    def _run(self, stop: threading.Event) -> None:
+        """Thread body: read → analyse → draw → publish, until ``stop`` is set."""
         try:
-            cfg = load_config()
-            model = self._model(cfg["pose_model"])
-            src = VideoSource(cfg["source"], cfg.get("process_width", 1280))
-        except Exception as e:  # noqa: BLE001
-            with self.lock:
-                self.stats = {"running": False, "error": str(e)}
-            print("[Engine] Fehler:", e)
+            config = Config.load(self.config_path)
+            analyzer = RestaurantAnalyzer(config, detector=self._detector(config))
+            source = VideoSource(config.source, config.process_width)
+        except Exception as exc:  # shown in the dashboard instead of crashing the server
+            self._set_stats({"running": False, "error": str(exc)})
+            print(f"[Engine] Fehler: {exc}")
             return
 
-        tables = build_tables(cfg)
-        seats_total = cfg.get("seats_total") or sum(t.seats for t in tables)
+        renderer = Renderer()
         last_snapshot = 0.0
-        fps, t_prev = 0.0, time.time()
+        fps, previous = 0.0, time.time()
 
-        while not self._stop.is_set():
-            frame = src.read()
-            if frame is None:
-                time.sleep(0.5)
-                continue
-            vt, wall = src.video_time(), time.time()
+        with source:
+            while not stop.is_set():
+                frame = source.read()
+                if frame is None:          # live stream interrupted → wait and retry
+                    time.sleep(0.5)
+                    continue
 
-            people = remove_duplicates(detect_people(model, frame, cfg["conf"]),
-                                       cfg["dedupe_iou"], cfg["dedupe_contain"])
-            for p in people:
-                p.posture = classify_posture(p, cfg["sit_ratio"])
-            per_table = assign_tables(people, cfg["tables"], only_sitting=True)
+                video_time, wall_time = source.timestamp, time.time()
+                result = analyzer.process(frame, video_time)
+                for visit in result.finished_visits:
+                    self.db.add_visit(self._to_wall_clock(visit, video_time, wall_time))
 
-            for t in tables:
-                v = t.update(vt, len(per_table[t.id]))
-                if v:  # Videozeit → Uhrzeit umrechnen
-                    self.db.add_visit(v["table"], wall - (vt - v["start"]), wall - (vt - v["end"]), v["guests"])
+                self.raw.put(encode_jpeg(frame, 85))
+                renderer.tables(frame, analyzer.tables, video_time)
+                renderer.people(frame, result.people)
+                self.annotated.put(encode_jpeg(frame, 75))
 
-            raw = frame.copy()
-            draw_tables(frame, tables, vt)
-            draw_people(frame, people)
+                # Exponential moving average keeps the FPS display calm.
+                now = time.time()
+                fps = 0.9 * fps + 0.1 / max(1e-6, now - previous)
+                previous = now
 
-            now = time.time()
-            fps = 0.9 * fps + 0.1 * (1 / max(1e-6, now - t_prev))
-            t_prev = now
+                summary = analyzer.summary(result)
+                if wall_time - last_snapshot >= self.SNAPSHOT_INTERVAL:
+                    self.db.add_snapshot(wall_time, summary["guests"],
+                                         summary["tables_occupied"], summary["tables_total"])
+                    last_snapshot = wall_time
 
-            guests = sum(t.guests for t in tables if t.occupied)
-            occupied = sum(t.occupied for t in tables)
-            if wall - last_snapshot >= self.SNAPSHOT_EVERY:
-                self.db.add_snapshot(wall, guests, occupied, len(tables))
-                last_snapshot = wall
+                self._set_stats({**summary, "running": True, "error": None, "ts": wall_time,
+                                 "fps": round(fps, 1), "frame_w": frame.shape[1], "frame_h": frame.shape[0]})
 
-            ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            ok2, rjpg = cv2.imencode(".jpg", raw, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            with self.lock:
-                if ok:
-                    self.jpeg = jpg.tobytes()
-                if ok2:
-                    self.raw_jpeg = rjpg.tobytes()
-                self.stats = {
-                    "running": True, "error": None, "ts": wall, "fps": round(fps, 1),
-                    "frame_w": frame.shape[1], "frame_h": frame.shape[0],
-                    "people_total": len(people),
-                    "standing": sum(p.posture == "standing" for p in people),
-                    "guests": guests, "seats_total": seats_total,
-                    "capacity": round(guests / max(1, seats_total), 3),
-                    "tables_occupied": occupied, "tables_total": len(tables),
-                    "tables": [t.snapshot(vt) for t in tables],
-                }
+        with self._stats_lock:
+            self._stats["running"] = False
 
-        src.release()
-        with self.lock:
-            self.stats["running"] = False
-
-    # ------------------------------------------------------------- Zugriff
-    def get_jpeg(self, raw=False):
-        with self.lock:
-            return self.raw_jpeg if raw else self.jpeg
-
-    def get_stats(self):
-        with self.lock:
-            return dict(self.stats)
+    @staticmethod
+    def _to_wall_clock(visit: Visit, video_time: float, wall_time: float) -> Visit:
+        """Convert a visit from video time to Unix time so the database stores real clock times."""
+        offset = wall_time - video_time
+        return Visit(visit.table_id, visit.start + offset, visit.end + offset, visit.guests)
