@@ -115,7 +115,7 @@ Mit NVIDIA-GPU vorher die passende PyTorch-Version von pytorch.org installieren 
 
 | Konfiguration | Was passiert |
 |---|---|
-| **1 Dashboard** | Dashboard starten → http://localhost:8000 im Browser öffnen |
+| **1 Dashboard** | Dashboard starten → die Adresse aus der Ausgabe öffnen (http://localhost:8000, oder 8001 usw., wenn 8000 schon belegt ist) |
 | **2 Tests** | 11 Logik-Tests, ohne Video |
 | **3 Testvideo erstellen** | erzeugt `videos/restaurant.mp4` aus Beispielfotos (falls noch kein Video da ist) |
 | **4 Tische markieren** | Tische mit der Maus ins Videobild zeichnen |

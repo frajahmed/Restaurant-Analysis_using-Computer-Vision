@@ -120,11 +120,46 @@ database = Database()
 app = create_app(Engine(database), database)
 
 
+def port_in_use(port: int) -> bool:
+    """``True`` if another program already uses ``port`` on this computer.
+
+    Checks both whether something answers on localhost (IPv4 and IPv6) and
+    whether the port can be bound. Only binding is not enough on Windows: there,
+    a server on 127.0.0.1 and one on 0.0.0.0 can share a port, and the browser
+    would silently show the other program.
+    """
+    for family, address in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.3)
+                if probe.connect_ex((address, port)) == 0:
+                    return True
+        except OSError:
+            pass                                   # e.g. IPv6 not available
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind((HOST, port))
+    except OSError:
+        return True
+    return False
+
+
+def free_port(start: int, attempts: int = 20) -> int:
+    """First free port from ``start`` on (e.g. 8000 taken by another project → 8001)."""
+    for port in range(start, start + attempts):
+        if not port_in_use(port):
+            return port
+    raise RuntimeError(f"Kein freier Port zwischen {start} und {start + attempts - 1} gefunden.")
+
+
 def main() -> None:
     import uvicorn
 
-    print(f"\n  Dashboard:  http://localhost:{PORT}\n  Im WLAN:    http://{local_ip()}:{PORT}\n")
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+    port = free_port(PORT)
+    if port != PORT:
+        print(f"\n  Port {PORT} ist schon belegt (anderes Programm) - nehme Port {port}.")
+    print(f"\n  Dashboard:  http://localhost:{port}\n  Im WLAN:    http://{local_ip()}:{port}\n")
+    uvicorn.run(app, host=HOST, port=port, log_level="warning")
 
 
 if __name__ == "__main__":
