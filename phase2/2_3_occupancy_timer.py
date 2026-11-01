@@ -6,6 +6,8 @@ it has been empty for ``free_after_sec`` (being hidden briefly does not count).
 
     free ──person──▶ pending ──3 s──▶ occupied ──empty──▶ leaving ──6 s──▶ free
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

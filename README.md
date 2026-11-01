@@ -51,7 +51,9 @@ Der Code hier ist eine eigenständige Umsetzung derselben Idee und Kapitelstrukt
 ├── tools/mark_tables.py      TableMarker – Tische per Mausklick markieren
 ├── Dockerfile, docker-compose.yml, docker/entrypoint.sh   Docker
 ├── .github/workflows/ci.yml  Tests + Docker-Build bei jedem Push
-└── tests/test_logic.py       Tests für die Logik (ohne YOLO)
+├── .run/                     fertige PyCharm-Startkonfigurationen
+├── tests/                    test_logic.py (ohne YOLO), e2e_yolo.py (echtes YOLO)
+└── videos/                   hier kommt restaurant.mp4 hin (nicht im Repo)
 ```
 
 ## Architektur
@@ -89,6 +91,9 @@ Deshalb laufen die Tests mit einem simulierten Detector, ohne YOLO und ohne Graf
 
 ## Installation
 
+Voraussetzung: **Python 3.8 oder neuer** (empfohlen 3.11 / 3.12 – Python 3.8 bekommt seit Oktober 2024
+keine Sicherheitsupdates mehr). Getestet wird automatisch mit 3.8 und 3.12.
+
 ```bash
 git clone https://github.com/frajahmed/Restaurant-Analysis_using-Computer-Vision.git
 cd Restaurant-Analysis_using-Computer-Vision
@@ -100,14 +105,47 @@ pip install -r requirements.txt
 Die YOLO-Gewichte (`yolo11n.pt`, `yolo11n-pose.pt`) lädt Ultralytics beim ersten Start automatisch herunter.
 Mit NVIDIA-GPU vorher die passende PyTorch-Version von pytorch.org installieren – deutlich schneller.
 
+## Mit PyCharm starten
+
+1. **File → Open** → den Projektordner öffnen (den Ordner, in dem `main.py` liegt).
+2. **Interpreter:** unten rechts in der Statusleiste den Python-Interpreter wählen
+   (z.B. die `venv` im Projektordner), dann im Terminal `pip install -r requirements.txt`.
+3. Oben rechts im Auswahlmenü stehen fertige Startkonfigurationen (Ordner `.run/`) –
+   auswählen und auf ▶ klicken:
+
+| Konfiguration | Was passiert |
+|---|---|
+| **1 Dashboard** | Dashboard starten → http://localhost:8000 im Browser öffnen |
+| **2 Tests** | 11 Logik-Tests, ohne Video |
+| **3 Testvideo erstellen** | erzeugt `videos/restaurant.mp4` aus Beispielfotos (falls noch kein Video da ist) |
+| **4 Tische markieren** | Tische mit der Maus ins Videobild zeichnen |
+| **Schritt 1.3 / 2.4 / 2.7** | einzelne Lernschritte im OpenCV-Fenster (mit `q` schließen) |
+
+Andere Schritte: eine Konfiguration kopieren und bei **Parameters** z.B. `2.2` eintragen.
+
+Hinweis: `app/__init__.py`, `tests/__init__.py` markieren nur einen Ordner als Python-Paket und enthalten
+deshalb keinen Code – das ist so richtig.
+
 ## Video vorbereiten
 
-1. Ein Restaurant-/Café-Video aus fester Kameraperspektive (z.B. lizenzfreie Clips von Pexels
-   oder Pixabay, Suchbegriff „restaurant cctv“ / „cafe top view“) als `videos/restaurant.mp4` ablegen.
-   Alternativ in `config.json` eine Webcam (`"source": "0"`) oder einen RTSP-Stream eintragen.
+Im Repository ist **kein Video** enthalten (Videos sind zu groß und haben eigene Lizenzen).
+
+**Sofort testen:** `python main.py testvideo` erzeugt aus den Beispielfotos, die mit Ultralytics
+installiert werden, ein kurzes Video als `videos/restaurant.mp4`. Es zeigt Personen, aber kein Restaurant –
+gut, um Erkennung und Dashboard auszuprobieren.
+
+**Echtes Restaurant-Video:** kostenlos z.B. bei
+[Mixkit – „Customers in a minimalist style restaurant“](https://mixkit.co/free-stock-video/customers-in-a-minimalist-style-restaurant-4385/)
+(von oben gefilmt), oder bei Pexels / Pixabay mit den Suchbegriffen „restaurant interior people“,
+„cafe top view“, „cafeteria“. Wichtig: feste Kamera, Tische gut sichtbar.
+
+1. Video herunterladen, in **`restaurant.mp4`** umbenennen und in den Ordner **`videos/`** legen
+   (vorher ein evtl. vorhandenes Testvideo löschen).
 2. Tische markieren – entweder
-   - `python tools/mark_tables.py` (Klick = Punkt, ENTER = fertig, Ziffer = Sitzplätze, `s` = speichern), oder
-   - später im Dashboard unter **Einstellungen**.
+   - `python main.py tables` (Klick = Punkt, ENTER = fertig, Ziffer = Sitzplätze, `s` = speichern), oder
+   - im Dashboard unter **Einstellungen**.
+
+Alternativ in `config.json` eine Webcam (`"source": "0"`) oder einen RTSP-Stream eintragen.
 
 ## Die Schritte
 

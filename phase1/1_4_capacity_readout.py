@@ -1,4 +1,6 @@
 """Step 1.4 – Capacity readout: people compared with the number of seats, plus a coloured bar."""
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

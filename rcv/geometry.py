@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, Tuple
 
 import cv2
 import numpy as np
 
-Point = tuple[float, float]
+# typing.Tuple instead of tuple[...]: this alias is evaluated at runtime (Python 3.8 support).
+Point = Tuple[float, float]
 
 
 @dataclass(frozen=True)

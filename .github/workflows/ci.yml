@@ -12,15 +12,33 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.8 = oldest supported version (e.g. existing PyCharm environments), 3.12 = Docker image.
+        python: ["3.8", "3.12"]
+    name: tests (Python ${{ matrix.python }})
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install test dependencies
-        run: pip install numpy opencv-python-headless
+      - name: Install Python ${{ matrix.python }} and test dependencies
+        run: |
+          pip install uv
+          uv python install ${{ matrix.python }}
+          uv venv -p ${{ matrix.python }} .venv
+          uv pip install -p .venv/bin/python numpy opencv-python-headless
       - name: Run logic tests
-        run: python main.py test
+        run: .venv/bin/python main.py test
+      - name: Load every module and script
+        run: |
+          .venv/bin/python - <<'PY'
+          import runpy, sys, pathlib, importlib
+          sys.path.insert(0, ".")
+          for m in ["rcv", "app.db"]:
+              importlib.import_module(m)
+          for f in sorted(pathlib.Path(".").glob("phase[12]/*.py")) + [pathlib.Path("tools/mark_tables.py")]:
+              runpy.run_path(str(f), run_name="check")
+          print("all modules load on", sys.version.split()[0])
+          PY
 
   docker:
     runs-on: ubuntu-latest

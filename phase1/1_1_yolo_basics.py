@@ -4,6 +4,8 @@ Model sizes (fast → accurate): yolo11n, yolo11s, yolo11m, yolo11l, yolo11x
 
 Usage:  python main.py 1.1 [model.pt]
 """
+from __future__ import annotations
+
 import sys
 import time
 from pathlib import Path

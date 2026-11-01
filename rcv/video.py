@@ -38,6 +38,14 @@ class VideoSource:
         self._cap = self._open()
         self.fps: float = self._cap.get(cv2.CAP_PROP_FPS) or 25.0
 
+    @classmethod
+    def check(cls, source: str) -> None:
+        """Raise :class:`FileNotFoundError` early if ``source`` is a video file that does not exist.
+
+        Call this before loading a model, so a missing video is reported immediately.
+        """
+        cls._resolve(source)
+
     # ------------------------------------------------------------------ internal helpers
     @staticmethod
     def _resolve(source: str) -> int | str:
@@ -51,7 +59,10 @@ class VideoSource:
         if not path.is_absolute():                 # relative to the project root
             path = ROOT / path
         if not path.exists():
-            raise FileNotFoundError(f"Video nicht gefunden: {path}")
+            raise FileNotFoundError(
+                f"Video nicht gefunden: {path}\n"
+                "-> Ein Restaurant-Video als videos/restaurant.mp4 speichern\n"
+                "  oder mit 'python main.py testvideo' ein Testvideo erzeugen.")
         return str(path)
 
     def _open(self) -> cv2.VideoCapture:

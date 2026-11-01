@@ -1,4 +1,6 @@
 """Step 1.2 – People detection: keep only class 0 ("person") above a minimum confidence."""
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

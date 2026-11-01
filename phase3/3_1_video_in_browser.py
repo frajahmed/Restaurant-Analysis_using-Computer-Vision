@@ -3,6 +3,8 @@
 The processed frames are streamed as MJPEG through FastAPI.
 Start: ``python main.py 3.1`` → open http://localhost:8000
 """
+from __future__ import annotations
+
 import sys
 import threading
 from pathlib import Path

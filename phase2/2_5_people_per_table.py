@@ -3,6 +3,8 @@
 Number of seated people inside each table polygon. The raw number still jumps
 whenever someone is hidden for a moment – step 2.6 fixes that.
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

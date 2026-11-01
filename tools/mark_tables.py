@@ -10,6 +10,8 @@ Controls:
 
 Usage:  python main.py tables  [--keep]   (--keep starts with the saved tables)
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
@@ -103,7 +105,7 @@ class TableMarker:
         self.config.tables = list(self.tables)
         self.config.seats_total = 0                 # 0 = derive from the tables
         self.config.save()
-        print(f"Gespeichert: {len(self.tables)} Tische, {self.config.total_seats} Plätze → config.json")
+        print(f"Gespeichert: {len(self.tables)} Tische, {self.config.total_seats} Plätze -> config.json")
 
     def run(self) -> None:
         cv2.namedWindow(self.WINDOW)

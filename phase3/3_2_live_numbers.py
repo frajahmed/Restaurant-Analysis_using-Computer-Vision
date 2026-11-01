@@ -3,6 +3,8 @@
 In addition to the video, ``/stats`` returns the key figures as JSON; the page
 polls it once per second. Start: ``python main.py 3.2``
 """
+from __future__ import annotations
+
 import sys
 import threading
 from pathlib import Path

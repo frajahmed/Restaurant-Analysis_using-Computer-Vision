@@ -2,6 +2,8 @@
 
 Run with ``python main.py test``, ``python tests/test_logic.py`` or ``pytest``.
 """
+from __future__ import annotations
+
 import json
 import sys
 import tempfile

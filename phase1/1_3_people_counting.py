@@ -1,4 +1,6 @@
 """Step 1.3 – People counting: number of boxes = number of people in the frame."""
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

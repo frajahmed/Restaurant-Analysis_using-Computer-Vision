@@ -4,6 +4,8 @@ Shows how visits are stored in SQLite and read back. The script fills a demo
 database (``demo.db``) with random data and prints some reports. The dashboard
 in ``app/`` does exactly this automatically.
 """
+from __future__ import annotations
+
 import random
 import sys
 import time

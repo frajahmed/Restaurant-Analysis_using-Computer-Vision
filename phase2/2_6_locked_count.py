@@ -4,6 +4,8 @@ Instead of the raw per-frame number we use the most frequent value of the last
 ``lock_window_sec`` seconds. The displayed ("locked") number only changes once a
 new value has been stable that long (see ``rcv.tables.CountSmoother``).
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

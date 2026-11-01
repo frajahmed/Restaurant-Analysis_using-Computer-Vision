@@ -4,6 +4,8 @@ Tables are polygons from ``config.json`` (draw them with ``python main.py tables
 A person belongs to a table when their reference point lies inside its polygon.
 In this step a table is "occupied" as soon as anybody is inside – no delay yet.
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

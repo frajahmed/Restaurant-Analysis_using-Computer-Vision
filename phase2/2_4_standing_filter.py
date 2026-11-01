@@ -5,6 +5,8 @@ model (people + 17 body keypoints) and check whether the thigh is roughly
 horizontal (sitting) or vertical (standing). Standing people are drawn grey and
 ignored by the table logic.
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

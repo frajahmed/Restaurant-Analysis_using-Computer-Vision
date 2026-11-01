@@ -3,6 +3,8 @@
 Every visit gets a start, end, duration and guest count. Finished visits are
 printed to the console and appended to ``visits.csv``.
 """
+from __future__ import annotations
+
 import csv
 import sys
 from datetime import timedelta

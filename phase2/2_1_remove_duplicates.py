@@ -3,6 +3,8 @@
 YOLO sometimes returns two boxes for one person (e.g. full body + upper body).
 Grey = discarded duplicate, green = kept.
 """
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

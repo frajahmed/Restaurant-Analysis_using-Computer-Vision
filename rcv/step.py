@@ -26,6 +26,7 @@ class VideoStep(ABC):
 
     def __init__(self, config: Config | None = None):
         self.config = config or Config.load()
+        VideoSource.check(self.config.source)   # fail fast, before any model is loaded
         self.renderer = Renderer()
 
     @abstractmethod
