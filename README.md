@@ -105,6 +105,19 @@ pip install -r requirements.txt
 Die YOLO-Gewichte (`yolo11n.pt`, `yolo11n-pose.pt`) lädt Ultralytics beim ersten Start automatisch herunter.
 Mit NVIDIA-GPU vorher die passende PyTorch-Version von pytorch.org installieren – deutlich schneller.
 
+## Am einfachsten (Windows): Doppelklick
+
+Im Projektordner im Windows-Explorer doppelt anklicken:
+
+| Datei | Was passiert |
+|---|---|
+| `START_1_Tests.bat` | Tests – am Ende muss „11 Tests bestanden.“ stehen |
+| `START_2_Personen_zaehlen.bat` | Fenster mit erkannten Personen (mit `Q` schließen) |
+| `START_3_Dashboard.bat` | Dashboard – der Browser öffnet sich von selbst |
+
+Gibt es noch kein Video, wird automatisch ein Testvideo erzeugt. Die Dateien benutzen die `venv` im
+Projektordner, falls vorhanden, sonst das installierte Python.
+
 ## Mit PyCharm starten
 
 1. **File → Open** → den Projektordner öffnen (den Ordner, in dem `main.py` liegt).

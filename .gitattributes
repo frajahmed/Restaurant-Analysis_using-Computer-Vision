@@ -1,3 +1,5 @@
 # Shell scripts must keep Unix line endings, otherwise the Docker container fails to start on Windows checkouts.
 *.sh text eol=lf
 Dockerfile text eol=lf
+# Windows start files need Windows line endings.
+*.bat text eol=crlf

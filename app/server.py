@@ -159,6 +159,11 @@ def main() -> None:
     if port != PORT:
         print(f"\n  Port {PORT} ist schon belegt (anderes Programm) - nehme Port {port}.")
     print(f"\n  Dashboard:  http://localhost:{port}\n  Im WLAN:    http://{local_ip()}:{port}\n")
+    if os.environ.get("OPEN_BROWSER") == "1":
+        # Used by the Windows start file: open the dashboard once the server is up.
+        import threading
+        import webbrowser
+        threading.Timer(4.0, webbrowser.open, args=(f"http://localhost:{port}",)).start()
     uvicorn.run(app, host=HOST, port=port, log_level="warning")
 
 
